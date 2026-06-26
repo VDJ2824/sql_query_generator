@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secure AI SQL Query Generator</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">SQL</div>
+        <div>
+          <p class="eyebrow">Secure AI Assistant</p>
+          <h1>QueryGuard</h1>
+        </div>
+      </div>
+
+      <section class="side-card login-panel">
+        <div class="section-title compact">
+          <span>01</span>
+          <h2>Account</h2>
+        </div>
+        <div id="sessionBadge" class="session-badge">Not logged in</div>
+        <label>
+          Username
+          <input id="usernameInput" type="text" autocomplete="username" placeholder="admin" />
+        </label>
+        <label>
+          Password
+          <input id="passwordInput" type="password" autocomplete="current-password" placeholder="admin123" />
+        </label>
+        <div class="actions stack-actions">
+          <button id="loginBtn" type="button">Login</button>
+          <button id="logoutBtn" type="button" class="secondary">Logout</button>
+        </div>
+        <p id="loginStatus" class="status-line">Use a seeded account such as admin/admin123.</p>
+      </section>
+
+      <section class="side-card security-panel protected-section">
+        <div class="section-title compact">
+          <span>02</span>
+          <h2>Security Context</h2>
+        </div>
+        <div class="status-grid">
+          <div>
+            <small>Role</small>
+            <strong id="roleStatus">-</strong>
+          </div>
+          <div>
+            <small>Allowed Tables</small>
+            <strong id="tablesStatus">-</strong>
+          </div>
+        </div>
+        <div id="rowRules" class="rule-list">Login to load row-level restrictions.</div>
+      </section>
+
+      <section class="side-card history-panel protected-section">
+        <div class="section-title compact">
+          <span>03</span>
+          <h2>History</h2>
+        </div>
+        <button id="historyBtn" type="button" class="secondary full-width">Refresh History</button>
+        <div id="historyOutput" class="history-list empty-state">Login to view your query history.</div>
+      </section>
+    </aside>
+
+    <main class="chat-workspace">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Natural language to safe SQL</p>
+          <h2>Ask for data. Review the generated SQL. Execute only what passes security.</h2>
+        </div>
+        <div class="trust-strip" aria-label="Security controls">
+          <span>RBAC</span>
+          <span>Row filters</span>
+          <span>Audit logs</span>
+        </div>
+      </header>
+
+      <section class="conversation">
+        <article class="message assistant-message">
+          <div class="avatar">AI</div>
+          <div class="bubble">
+            <h3>How this assistant works</h3>
+            <p>
+              I generate SQL options, but the backend validates and authorizes everything again
+              before preview and execution. Choose one option, inspect the enforced SQL, then execute
+              only if the backend allows it.
+            </p>
+          </div>
+        </article>
+
+        <section class="prompt-panel protected-section composer-card">
+          <div class="composer-topline">
+            <div>
+              <p class="eyebrow">Prompt</p>
+              <h2>What would you like to query?</h2>
+            </div>
+            <button id="clearBtn" type="button" class="ghost">Clear</button>
+          </div>
+          <textarea
+            id="promptInput"
+            placeholder="Example: Show employees whose salary is greater than 50000"
+          ></textarea>
+          <div class="composer-actions">
+            <button id="generateBtn" type="button">Generate Query Options</button>
+            <p class="hint">Gemini proposes options. Your backend remains the security boundary.</p>
+          </div>
+        </section>
+
+        <section class="options-panel protected-section result-section">
+          <div class="result-header">
+            <div>
+              <p class="eyebrow">Step 1</p>
+              <h2>Choose One Query Option</h2>
+            </div>
+            <span class="soft-badge">Required before preview</span>
+          </div>
+          <div id="optionsContainer" class="option-list empty-state">
+            Generate options to review possible SQL queries.
+          </div>
+        </section>
+
+        <section class="preview-panel protected-section result-section">
+          <div class="result-header">
+            <div>
+              <p class="eyebrow">Step 2</p>
+              <h2>Preview Security-Enforced Query</h2>
+            </div>
+            <button id="previewBtn" type="button">Preview Selected Query</button>
+          </div>
+          <div id="previewOutput" class="preview-output empty-state">
+            Select one query option, then preview the security-enforced query.
+          </div>
+        </section>
+
+        <section class="execution-panel protected-section result-section">
+          <div class="result-header">
+            <div>
+              <p class="eyebrow">Step 3</p>
+              <h2>Execute Safely</h2>
+            </div>
+            <button id="executeBtn" type="button">Execute Selected Query</button>
+          </div>
+          <p id="executionNotice" class="status-line">Preview a query before executing it.</p>
+          <div id="executionOutput" class="output-box empty-state">Execution results will appear here.</div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="confirmModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-panel">
+      <p class="eyebrow">Confirmation required</p>
+      <h2 id="modalTitle">Confirm Data Change</h2>
+      <p>This operation may modify data. Do you want to continue?</p>
+      <div class="actions">
+        <button id="confirmExecuteBtn" type="button" class="danger">Continue</button>
+        <button id="cancelExecuteBtn" type="button" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="./script.js"></script>
+</body>
+</html>

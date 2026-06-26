@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files and secrets
+.env
+backend/.env
+*.env.local
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Runtime logs
+*.log
+
+# Keep the sample SQLite database for this college project.
