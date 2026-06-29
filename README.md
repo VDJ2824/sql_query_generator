@@ -4,6 +4,8 @@ A college-project SQL assistant that converts natural-language prompts into SQL 
 
 The central rule is simple: AI-generated SQL is never trusted directly. SQL is validated before generation output is stored, again before preview, and again before execution.
 
+Live on: https://ai-sql-query-generator-sigma.vercel.app/
+
 ## Active Architecture
 
 - `client/`: React + Vite website only.
