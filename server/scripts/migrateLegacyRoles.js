@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("../src/config/env");
 
 const {connectDatabase, disconnectDatabase} = require("../src/config/database");
 const {migrateLegacyRoles} = require("../src/migrations/migrateLegacyRoles");
