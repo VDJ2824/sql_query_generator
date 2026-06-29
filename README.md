@@ -1,186 +1,306 @@
 # Secure AI SQL Query Generator
 
-A beginner-friendly college project that converts natural language prompts into SQL query options, then validates, authorizes, previews, and executes them safely.
+A college-project SQL assistant that converts natural-language prompts into SQL options, validates them, previews impact, and executes only backend-approved queries.
 
-The central rule is simple: AI-generated SQL is never trusted directly. Every query is validated and authorized again before preview, and again before execution.
+The central rule is simple: AI-generated SQL is never trusted directly. SQL is validated before generation output is stored, again before preview, and again before execution.
 
-## Tech Stack
+## Active Architecture
 
-- Backend: Python 3, FastAPI, SQLAlchemy, SQLite, JWT, bcrypt, sqlglot, Gemini API
-- Frontend: HTML, CSS, Vanilla JavaScript
-- Database: SQLite development database at `database/company.db`
-- Tests: pytest and FastAPI TestClient
+- `client/`: React + Vite website only.
+- `server/`: Node.js + Express gateway, MongoDB Atlas metadata, JWT authentication, users, policies, selected queries, history, and audit logs.
+- `sql-service/`: Python FastAPI internal service for schema reading, Gemini-based SQL generation, sqlglot validation, preview, and safe execution.
+- `docs/`: architecture, API, migration, cloud-refactor, and deployment notes.
+- `legacy/`: older implementations retained for reference.
 
-## Main Features
+React calls only Express at `/api`. Express is the only service that may call `sql-service`. Database credentials, MongoDB secrets, Gemini keys, and internal service keys must never be exposed to React.
 
-- JWT authentication with bcrypt password hashing
-- Role-based access control for admin, manager, employee, faculty, and student users
-- Dynamic schema visibility based on the logged-in user's role
-- Natural-language-to-SQL generation with Gemini plus rule-based fallback generation
-- Server-side query option storage and temporary selected-query records
-- SQL parsing and validation with sqlglot
-- Row-level security enforcement for employee, student, manager, and faculty access
-- Safe preview workflow for SELECT, UPDATE, and DELETE
-- Confirmation requirement for data-changing queries
-- TCL commands are view-only
-- DCL and dangerous DDL commands are blocked
-- Query history and audit logging
-- Frontend that escapes displayed text and handles 401/403 responses safely
+## Service Boundary
 
-## Setup
+The active request path is:
 
-1. Create a virtual environment from the project root.
+```text
+React/Vite browser
+  -> Express API
+  -> FastAPI SQL service
+  -> Neon PostgreSQL or TiDB/MySQL target workspace
+```
+
+Responsibilities are intentionally separated:
+
+- React stores only the JWT for this college-project demo and calls the Express `/api` base URL. It never calls FastAPI directly.
+- Express owns MongoDB Atlas access, JWT authentication, users, workspace mapping, database connection metadata, access policies, generated options, selected queries, query history, and audit logs.
+- Express calls FastAPI with `SQL_SERVICE_URL` and the `x-internal-api-key` header.
+- FastAPI does not connect to MongoDB in the active application flow. It performs schema inspection, Gemini SQL generation, SQL validation, preview, execution, and PostgreSQL/MySQL workspace routing.
+- React never receives MongoDB URIs, target database URLs, provider credentials, `SQL_SERVICE_API_KEY`, internal workspace identifiers, or private schema/database names.
+
+## Managed Cloud Database Direction
+
+The normal development and deployment path now uses managed cloud databases:
+
+- MongoDB Atlas through `MONGODB_URI` for authentication, policies, history, selected queries, and audit logs.
+- Neon PostgreSQL through `POSTGRES_DEMO_URL` as a target SQL engine.
+- TiDB Cloud MySQL-compatible through `MYSQL_DEMO_URL` as a target SQL engine.
+
+Docker compose files remain in the repository for reference and older local experiments, but Docker-managed PostgreSQL/MySQL/MongoDB are deprecated for the normal workflow.
+
+Each application user receives a private SQL workspace per cloud SQL engine. TiDB uses one private database per user. PostgreSQL uses one private database when the provider credential supports it; otherwise it safely falls back to one private schema per user inside the configured Neon database. Users do not need Neon accounts, TiDB accounts, or external account linking.
+
+## Technology Stack
+
+- Client: React, Vite, React Router, Axios, CSS.
+- Server: Node.js, Express, MongoDB, Mongoose, JWT, bcrypt.
+- SQL service: Python 3, FastAPI, SQLAlchemy, sqlglot, Gemini API.
+- Target SQL engines: PostgreSQL and MySQL-compatible databases.
+- Tests: Jest/Supertest for Express, pytest for sql-service, Vitest for React.
+
+## Environment Setup
+
+Create the root cloud environment file from the example:
+
+```bash
+cp .env.cloud.example .env.cloud
+```
+
+Fill these root `.env.cloud` values with your cloud credentials:
+
+```env
+MONGODB_URI=
+JWT_SECRET=
+JWT_EXPIRES_IN=1h
+SQL_SERVICE_URL=http://127.0.0.1:8001
+SQL_SERVICE_API_KEY=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+POSTGRES_DEMO_URL=
+MYSQL_DEMO_URL=
+MYSQL_SSL_CA_PATH=
+VITE_API_BASE_URL=http://127.0.0.1:5000/api
+```
+
+For local non-Docker development, both `server/` and `sql-service/` automatically load the root `.env.cloud` file. Existing platform environment variables still win over file values, so this also works safely on Render, Railway, Vercel, or similar platforms where variables are injected directly.
+
+Do not copy database URLs, MongoDB credentials, Gemini keys, JWT secrets, or internal service keys into `client/.env`. The React client must only know the public Express API URL, for example:
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:5000/api
+```
+
+## Deployment Environment Variables
+
+Vercel client:
+
+```env
+VITE_API_BASE_URL=
+```
+
+Render Express server:
+
+```env
+MONGODB_URI=
+JWT_SECRET=
+JWT_EXPIRES_IN=1h
+SQL_SERVICE_URL=
+SQL_SERVICE_API_KEY=
+CLIENT_URL=
+NODE_ENV=production
+```
+
+Optional Express email OTP variables:
+
+```env
+BREVO_API_KEY=
+BREVO_FROM=
+LOGIN_OTP_EXPIRES_IN_MINUTES=10
+EMAIL_SEND_TIMEOUT_MS=10000
+```
+
+Render FastAPI SQL service:
+
+```env
+SQL_SERVICE_API_KEY=
+POSTGRES_DEMO_URL=
+MYSQL_DEMO_URL=
+MYSQL_SSL_CA_PATH=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+Do not configure `MONGODB_URI` on the FastAPI SQL service. MongoDB access belongs only to Express.
+
+`POSTGRES_DEMO_URL` must be a SQLAlchemy PostgreSQL URL, for example:
+
+```text
+postgresql+psycopg://USER:PASSWORD@HOST/DATABASE?sslmode=require
+```
+
+`MYSQL_DEMO_URL` must be a SQLAlchemy MySQL-compatible URL, for example:
+
+```text
+mysql+pymysql://USER:PASSWORD@HOST:4000/DATABASE?ssl_verify_cert=true
+```
+
+Use the exact SSL/TLS parameters required by your Neon or TiDB Cloud dashboard. If your TiDB runtime needs a separate CA bundle path, set `MYSQL_SSL_CA_PATH`; do not place certificate contents in React or logs.
+
+## Initialize Cloud Demo Tables
+
+After setting `POSTGRES_DEMO_URL` and `MYSQL_DEMO_URL`, create the sample tables and data:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python3 -m pip install -r sql-service/requirements.txt
+cd sql-service
+python3 scripts/init_cloud_databases.py --target all
 ```
 
-2. Install backend packages.
+This creates idempotent demo tables:
+
+- `Employee`
+- `Students`
+- `Department`
+
+Each managed engine receives 25 employees, 25 students, and 5 departments.
+
+## Run Locally Without Docker
+
+Terminal 1, start the Python SQL service:
 
 ```bash
-cd backend
-pip install -r requirements.txt
-cd ..
+cd sql-service
+source ../.venv/bin/activate
+uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 ```
 
-3. Copy the example environment file.
+Terminal 2, start the Express server:
 
 ```bash
-cp backend/.env.example backend/.env
+cd server
+npm install
+npm run seed
+npm run backfill:workspaces
+npm run dev
 ```
 
-4. Edit `backend/.env`.
+Terminal 3, start the React client:
+
+```bash
+cd client
+npm install
+npm run dev
+```
+
+Open:
 
 ```text
-SECRET_KEY=replace-with-a-long-random-secret
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-1.5-flash
-DATABASE_URL=sqlite:///../database/company.db
+http://127.0.0.1:5173
 ```
 
-5. Run the backend from the project root.
-
-```bash
-uvicorn backend.main:app --reload
-```
-
-6. Open the frontend.
-
-```bash
-cd frontend
-python3 -m http.server 5500
-```
-
-Then open `http://127.0.0.1:5500` in a browser.
-
-## Seeded Test Users
-
-The database initializes with sample employees, students, and users when it is empty.
+Seeded users:
 
 ```text
-admin / admin123
-it_manager / manager123
-hr_manager / manager123
-employee_6 / employee123
-student_1 / student123
-faculty_1 / faculty123
-```
-
-## Authentication Examples
-
-Register a test user. Registration is open only for project testing; a production app should restrict it to admins.
-
-```bash
-curl -X POST http://127.0.0.1:8000/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "analyst_test",
-    "password": "test123",
-    "role": "employee",
-    "department": "IT",
-    "employee_id": 6
-  }'
-```
-
-Log in.
-
-```bash
-curl -X POST http://127.0.0.1:8000/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "admin123"}'
-```
-
-Use the returned token.
-
-```bash
-TOKEN="paste_access_token_here"
-curl http://127.0.0.1:8000/me \
-  -H "Authorization: Bearer $TOKEN"
+admin@example.com / admin123
+demo.user@example.com / user123
 ```
 
 ## Query Workflow
 
-1. Log in and request `/schema` to see only the allowed tables and columns.
-2. Submit a natural language prompt to `/generate`.
-3. Select one generated option through `/select-query`.
-4. Preview the selected query through `/preview-selected-query`.
-5. Execute through `/execute-selected-query`.
-6. UPDATE, INSERT, and DELETE require explicit confirmation when allowed.
-7. Every important event is logged through audit records.
+1. Log in through Express.
+2. Choose an allowed managed database connection.
+3. Submit a natural-language prompt.
+4. Express calls the Python SQL service with verified user, policy, and connection context.
+5. The SQL service lazily provisions the user's private workspace for the selected engine.
+6. SQL options are stored server-side and tied to the authenticated user, selected database, dialect, workspace, expiry, and execution state.
+7. React selects an option by `optionId` only.
+8. Preview revalidates SQL and estimates impact inside that user's workspace.
+9. Execution revalidates SQL again inside the same workspace and logs the attempt.
 
-## Security Rules
+If the selected target database is temporarily unreachable during generation, the SQL service can still generate conservative options from MongoDB access policies. If the SQL service itself is unavailable, Express returns a minimal policy-based SELECT fallback instead of blocking the prompt workflow. Preview and execution still require Python SQL-service validation and a successful target database connection.
 
-- AI output is treated as untrusted input.
-- Password hashes are never returned in API responses.
-- JWT tokens are required for protected endpoints.
-- Restricted tables such as Users, QueryHistory, and AuditLogs are not exposed through schema or normal SQL access.
-- `password_hash` is always restricted.
-- Multiple statements and SQL comments are rejected.
-- JOIN and UNION are rejected in this starter project because they can complicate row-level enforcement.
-- UPDATE and DELETE must contain WHERE clauses.
-- UPDATE and DELETE require preview and confirmation.
-- TCL commands are never executed.
-- DCL and dangerous DDL commands are blocked.
-- Audit logs redact common password, token, secret, and API key patterns.
+## SQL Security Rules
 
-More details are in `SECURITY.md`.
+- CRUD means `SELECT`, `INSERT`, `UPDATE`, and `DELETE`.
+- DQL `SELECT` can execute after policy validation.
+- DML `INSERT`, `UPDATE`, and `DELETE` can execute only when allowed by policy.
+- `UPDATE` and `DELETE` require `WHERE`, preview, affected-row estimate, and confirmation.
+- `DELETE` warns that deleted rows cannot be restored through the application.
+- TCL commands are explanation-only and never sent to the database driver.
+- DCL commands such as `GRANT` and `REVOKE` are blocked.
+- Database administration commands such as `CREATE DATABASE`, `DROP DATABASE`, `CREATE SCHEMA`, `DROP SCHEMA`, `CREATE USER`, `CREATE ROLE`, `GRANT`, `REVOKE`, and `ALTER SYSTEM` are blocked for normal user SQL.
+- Allow-listed table/index DDL such as `CREATE TABLE` can run only when policy allows `DDL`, after preview and explicit confirmation.
+- `DROP TABLE` requires a stronger confirmation: the user must type the exact table name, and the server verifies it before execution.
+- Multiple statements, SQL comments, restricted tables, system schemas, and cross-database/cross-schema references are blocked.
+- Users may create multiple ordinary tables inside their own private workspace. They cannot reference another user's PostgreSQL schema, TiDB database, or schema-qualified/database-qualified object names.
 
-## Running Tests
+## Main API Endpoints
 
-Run the complete test suite from the project root.
+- `POST /api/auth/register`
+- `POST /api/auth/login` - verifies email/password and sends a Brevo OTP challenge
+- `POST /api/auth/verify-login-otp` - verifies the one-time code and returns the JWT
+- `GET /api/auth/me`
+- `GET /api/database-connections`
+- `POST /api/database-connections`
+- `POST /api/queries/generate`
+- `POST /api/queries/select`
+- `POST /api/queries/preview`
+- `POST /api/queries/execute`
+- `GET /api/history`
+- `GET /api/admin/audit-logs`
+- `GET /health` on `sql-service`
+- `POST /internal/schema` on `sql-service`, internal only
+- `POST /internal/generate` on `sql-service`, internal only
+- `POST /internal/preview` on `sql-service`, internal only
+- `POST /internal/execute` on `sql-service`, internal only
+
+## Brevo Login OTP
+
+Login is a two-step flow:
+
+1. The user submits `username` and `password` to `POST /api/auth/login`.
+2. Express verifies credentials from MongoDB, stores a hashed one-time code, and sends the code using Brevo when configured.
+3. The user submits the OTP to `POST /api/auth/verify-login-otp`.
+4. Express verifies the OTP, clears it from the user record, and returns the JWT.
+
+Backend-only environment variables:
 
 ```bash
-python3 -m pytest
+BREVO_API_KEY=
+BREVO_FROM=
+LOGIN_OTP_EXPIRES_IN_MINUTES=10
+EMAIL_SEND_TIMEOUT_MS=10000
 ```
 
-Run syntax checks.
+Do not add Brevo keys to `client/.env`. In non-production local development, the backend may return `debugOtp` if Brevo is not configured so the app remains testable.
+
+## Tests
+
+Run Express tests:
 
 ```bash
-python3 -m compileall backend tests
-node --check frontend/script.js
+cd server
+npm test
 ```
 
-## Useful Endpoints
+Run sql-service tests:
 
-- `GET /health`
-- `POST /register`
-- `POST /login`
-- `GET /me`
-- `GET /schema`
-- `POST /generate`
-- `POST /select-query`
-- `GET /selected-query`
-- `POST /preview-selected-query`
-- `POST /execute-selected-query`
-- `GET /history`
-- `GET /admin/audit-logs`
+```bash
+cd sql-service
+source ../.venv/bin/activate
+python3 -m pytest -q
+```
 
-## Important Development Notes
+Run React checks:
 
-- SQLite is used for development and demonstration.
-- The frontend stores the JWT in `sessionStorage` for this demo. A production deployment should use stricter browser storage and HTTPS-only protections.
-- The frontend may hide buttons for convenience, but the backend always enforces authorization.
-- Replace the demo `SECRET_KEY` before sharing or deploying the backend.
+```bash
+cd client
+npm test
+npm run build
+```
+
+## Notes
+
+- `docker-compose.yml` and `docker-compose.production.yml` are retained for reference but are not the preferred cloud workflow.
+- `GEMINI_API_KEY` is the active AI provider key in this version.
+- `OPENAI_API_KEY` and `OPENAI_MODEL` appear only as optional placeholders for a future provider switch.
+- See `SECURITY.md` for the security model.
+- See `docs/cloud-refactor-plan.md` for the cloud migration plan.
+- See `docs/workspace-isolation.md` for private SQL workspace isolation details.

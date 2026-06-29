@@ -1,0 +1,34 @@
+.git
+.DS_Store
+
+# Secrets and local runtime state
+.env
+*.env.local
+.env.production
+backend/.env
+client/.env
+server/.env
+sql-service/.env
+deploy/nginx/certs/*.pem
+deploy/nginx/certs/*.key
+backups/
+
+# Node build artifacts
+node_modules/
+client/node_modules/
+client/dist/
+server/node_modules/
+coverage/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+sql-service/.venv/
+
+# Legacy and local databases are not needed in app images
+legacy/
+database/*.db
+database/workspaces/

@@ -13,8 +13,17 @@ env/
 
 # Environment files and secrets
 .env
+.env.cloud
 backend/.env
+client/.env
+server/.env
+sql-service/.env
 *.env.local
+
+# Node
+node_modules/
+dist/
+coverage/
 
 # OS and editor files
 .DS_Store
@@ -23,5 +32,11 @@ backend/.env
 
 # Runtime logs
 *.log
+backups/
+
+# Production TLS files must stay off Git.
+deploy/nginx/certs/*.pem
+deploy/nginx/certs/*.key
 
 # Keep the sample SQLite database for this college project.
+database/workspaces/

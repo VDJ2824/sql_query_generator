@@ -1,3 +1,8 @@
+// LEGACY REFERENCE ONLY.
+// The active React/Vite client uses client/src/services/ApiClient.js and calls
+// only the Express /api gateway. This older vanilla script is retained for
+// historical comparison and must not be imported by the active application.
+
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 const state = {

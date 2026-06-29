@@ -1,0 +1,126 @@
+# Deprecated for the normal managed-cloud workflow.
+# Kept only for older local experiments and reference. Prefer README.md
+# instructions with MongoDB Atlas, Neon PostgreSQL, and TiDB Cloud.
+services:
+  mongo:
+    image: mongo:7
+    container_name: sql-query-generator-mongo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MONGO_LOCAL_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  postgres:
+    image: postgres:16
+    container_name: sql-query-generator-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sql_generator_postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_admin_password}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-sql_app_user}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-sql_app_password}
+    ports:
+      - "127.0.0.1:${POSTGRES_LOCAL_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres_admin} -d ${POSTGRES_DB:-sql_generator_postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+
+  mysql:
+    image: mysql:8
+    container_name: sql-query-generator-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sql_generator_mysql}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-mysql_root_password}
+      MYSQL_USER: ${MYSQL_USER:-sql_app_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sql_app_password}
+    ports:
+      - "127.0.0.1:${MYSQL_LOCAL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./database/mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  sql-service:
+    image: python:3.12-slim
+    container_name: sql-query-generator-sql-service
+    working_dir: /app/sql-service
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      SQL_SERVICE_API_KEY: dev-internal-api-key
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      POSTGRES_DEMO_URL: postgresql+psycopg://${POSTGRES_APP_USER:-sql_app_user}:${POSTGRES_APP_PASSWORD_URL:-sql_app_password}@postgres:5432/${POSTGRES_DB:-sql_generator_postgres}
+      MYSQL_DEMO_URL: mysql+pymysql://${MYSQL_USER:-sql_app_user}:${MYSQL_PASSWORD_URL:-sql_app_password}@mysql:3306/${MYSQL_DATABASE:-sql_generator_mysql}
+      SQLITE_DEMO_PATH: /app/database/company.db
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./sql-service:/app/sql-service
+      - ./database:/app/database
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload"
+
+  server:
+    image: node:22-slim
+    container_name: sql-query-generator-server
+    working_dir: /app/server
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - sql-service
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      CLIENT_ORIGIN: http://127.0.0.1:5173
+      MONGODB_URI: mongodb://mongo:27017/sql-query-generator
+      JWT_SECRET: dev-change-this-secret
+      JWT_EXPIRES_IN: 1h
+      SQL_SERVICE_URL: http://sql-service:8001
+      SQL_SERVICE_API_KEY: dev-internal-api-key
+    volumes:
+      - ./server:/app/server
+    command: >
+      sh -c "npm install &&
+             npm run dev"
+
+  client:
+    image: node:22-slim
+    container_name: sql-query-generator-client
+    working_dir: /app/client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://127.0.0.1:5000/api
+    volumes:
+      - ./client:/app/client
+    command: >
+      sh -c "npm install &&
+             npm run dev -- --host 0.0.0.0"
+
+volumes:
+  mongo-data:
+  postgres-data:
+  mysql-data:

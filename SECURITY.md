@@ -1,142 +1,165 @@
 # Security Controls
 
-This project is designed as a secure, beginner-friendly demonstration of AI-assisted SQL generation. The most important principle is that generated SQL is never trusted just because it came from the AI or the frontend.
+This project follows a defense-in-depth design for AI-assisted SQL. The core rule is: AI-generated SQL is never trusted directly.
 
-## Trust Boundary
+## Architecture Security Boundary
 
-- The Gemini response is treated as untrusted input.
-- Frontend-submitted SQL is not trusted.
-- Query options are stored server-side after generation.
-- `/select-query` uses the server-saved generated option instead of trusting the SQL sent by the browser.
-- SQL is validated and authorized before preview.
-- SQL is validated and authorized again before execution.
+- `client/` is a React website only.
+- React calls only the Express API at `/api`.
+- React never calls `sql-service/` directly.
+- `server/` is the trusted gateway between the website, MongoDB Atlas, and `sql-service/`.
+- `sql-service/` is internal and requires `x-internal-api-key` for every `/internal/*` endpoint.
+- Neon PostgreSQL and TiDB Cloud connection URLs live only in SQL service environment variables.
+- MongoDB, target database, Gemini, JWT, and internal API secrets are never exposed to React.
+
+## Managed Cloud Database Model
+
+The normal workflow uses:
+
+- MongoDB Atlas through `MONGODB_URI`.
+- Neon PostgreSQL through `POSTGRES_DEMO_URL`.
+- TiDB Cloud MySQL-compatible through `MYSQL_DEMO_URL`.
+
+Each user receives one private SQL workspace per cloud SQL engine. TiDB uses one private database per user. PostgreSQL uses a private database when the credential supports `CREATE DATABASE`; otherwise the SQL service provisions one private schema per user and forces PostgreSQL sessions into that schema.
+
+Docker compose files remain for reference, but Docker-managed databases are deprecated for the normal setup.
+
+## Secrets
+
+The following values must not be exposed to React:
+
+- `MONGODB_URI`
+- `JWT_SECRET`
+- `SQL_SERVICE_URL`
+- `SQL_SERVICE_API_KEY`
+- `GEMINI_API_KEY`
+- `POSTGRES_DEMO_URL`
+- `MYSQL_DEMO_URL`
+- Any target database password or connection string
+
+Environment examples contain placeholders only.
 
 ## Authentication
 
-- Passwords are hashed with bcrypt through Passlib.
-- Plaintext passwords are never stored.
-- API routes use JWT bearer tokens with `OAuth2PasswordBearer`.
-- Token settings come from environment variables:
-  - `SECRET_KEY`
-  - `ALGORITHM`
-  - `ACCESS_TOKEN_EXPIRE_MINUTES`
-- Protected routes return `401` for missing, invalid, or expired tokens.
-- Password hashes are not returned in API responses.
+- Express handles login and JWT issuance.
+- Passwords are hashed with bcrypt before storage.
+- Password hashes are excluded from normal user responses.
+- Protected Express endpoints use JWT bearer authentication.
+- Public registration accepts username, email, password, and confirmPassword only.
+- Public registration always creates a `USER` account.
+- `/api/auth/me` loads the current user from MongoDB so stale token role data is not trusted.
 
 ## Authorization
 
-Supported roles:
+- Supported roles are `USER` and `ADMIN`.
+- Roles and policies are stored in MongoDB.
+- Express loads the current user from MongoDB after JWT verification.
+- Express loads active database connection metadata and access policies from MongoDB.
+- React-submitted roles, policies, allowed tables, allowed columns, user IDs, and SQL are not trusted.
+- User history and selected queries are scoped by authenticated `userId`.
+- Generated and selected SQL options are also bound to the authenticated user's private workspace identifier.
+- Audit logs are protected by admin-only middleware.
 
-- admin
-- manager
-- employee
-- faculty
-- student
+## SQL Service Controls
 
-Controls:
+`sql-service/` performs:
 
-- Admin can access allowed Employee and Students data.
-- Manager access is limited to Employee rows in the manager's department.
-- Employee access is limited to the employee's own Employee row.
-- Faculty access is limited to Students assigned to that faculty user.
-- Student access is limited to the student's own Students row.
-- Restricted internal tables are blocked from normal schema and SQL access.
-- Restricted columns such as `password_hash` are blocked.
+- Dynamic schema reading.
+- SQL dialect selection for PostgreSQL and MySQL-compatible engines.
+- SQL generation with Gemini plus safe fallback rules.
+- SQL classification and validation with sqlglot.
+- Policy enforcement by database connection, table, column, and operation.
+- Lazy private workspace provisioning and workspace-scoped SQLAlchemy engines.
+- Safe preview.
+- Safe execution.
 
-## SQL Validation
+The service validates SQL:
 
-SQL validation is implemented with sqlglot in `backend/sql_validator.py`.
+- before returning generated options
+- before preview
+- before execution
 
-Blocked or restricted behavior:
+Generation may fall back to access-policy schema metadata when the target database is unreachable. If the SQL service itself is unavailable, Express can return minimal policy-based SELECT suggestions so the prompt workflow does not freeze. These fallbacks are used only for suggesting SQL options. Preview and execution still require Python SQL-service validation and fail closed if the SQL service or target database is unavailable.
+
+## SQL Command Policy
+
+| SQL Type | Policy |
+| --- | --- |
+| DQL | `SELECT` can execute after schema and policy validation |
+| DML | `INSERT`, `UPDATE`, and `DELETE` can execute only when allowed by policy |
+| DDL | Allow-listed table/index DDL can execute only when policy allows `DDL`, after preview and confirmation |
+| TCL | Explanation-only; never sent to the target database |
+| DCL | Blocked |
+| Database administration | Blocked, including database/user/role/system commands |
+| UNKNOWN | Blocked |
+
+CRUD in this project means `SELECT`, `INSERT`, `UPDATE`, and `DELETE`. `DROP TABLE` has a stronger confirmation requirement than `DELETE`: the user must type the exact table name, and Express verifies that typed value server-side before execution.
+
+Blocked patterns include:
 
 - Multiple SQL statements
-- Semicolon-separated statement chains
-- SQL comments used to bypass validation
-- Unknown query types
+- SQL comments used to bypass checks
+- Unsupported dialect syntax
 - Restricted tables
 - Restricted columns
-- Unsafe JOIN and UNION patterns in this starter project
-- UPDATE without WHERE
-- DELETE without WHERE
+- Cross-schema or cross-database references
+- `SELECT *` when column restrictions are active
+- `UPDATE` without `WHERE`
+- `DELETE` without `WHERE`
+- Unsafe joins, unions, CTEs, nested selects, and stored-procedure style commands
 
-Query type policy:
+## Access Policy Enforcement
 
-- SELECT can execute after validation and authorization.
-- INSERT is admin-only and requires confirmation.
-- UPDATE is admin or authorized-manager only, requires WHERE, preview, and confirmation.
-- DELETE is admin-only, requires WHERE, preview, and confirmation.
-- TCL commands are view-only and never executed.
-- DCL commands are blocked.
-- Dangerous DDL commands are blocked.
+The general-purpose version does not use employee, student, faculty, manager, department, or other business-profile identity filters.
 
-## Row-Level Security
+Access is controlled by:
 
-Row-level security is enforced server-side in `backend/impact_analyzer.py`.
+- database connection grants by role
+- allowed operations
+- allowed schemas
+- allowed tables
+- blocked tables
+- allowed columns
+- preview and confirmation rules
 
-Examples:
+## Preview And Execution
 
-- Employee queries receive an `employee_id = current_user.employee_id` filter.
-- Student queries receive a `student_id = current_user.student_id` filter.
-- Manager queries receive a `department = current_user.department` filter.
-- Faculty queries receive a `faculty_id = current_user.user_id` filter.
-- Existing WHERE clauses are combined with the enforced rule instead of replaced.
-
-## Preview and Execution Safety
-
-- Preview never executes UPDATE, DELETE, TCL, DCL, or DDL.
-- SELECT preview returns a count and up to 20 rows.
-- UPDATE preview converts the write query into a SELECT preview using the same enforced WHERE condition.
-- DELETE preview converts the delete query into a SELECT preview using the same enforced WHERE condition.
-- Execution re-runs validation, authorization, and row-level enforcement.
-- SELECT execution returns up to 100 rows.
-- UPDATE and DELETE must have a successful preview audit event and explicit confirmation.
-- Write failures trigger database rollback handling.
+- Express stores generated options server-side.
+- Users select by `optionId` only.
+- Express retrieves the selected option from MongoDB.
+- Express never accepts arbitrary SQL from React for preview or execution.
+- Selected queries expire after 15 minutes.
+- A user can have only one active selected query.
+- Selected queries must match the authenticated user's current workspace before preview or execution.
+- `INSERT`, `UPDATE`, and `DELETE` are blocked by Express until preview has happened.
+- `UPDATE` and `DELETE` must include `WHERE`.
+- Writes require confirmation when policy marks them as confirmation-required.
+- `sql-service/` revalidates and rechecks policy before execution.
+- Every execution attempt, including blocked attempts, is stored in history and audit logs.
 
 ## Audit Logging
 
-Important actions are audited:
+Audited events include:
 
-- Login success and failure
-- Schema access
+- Register
+- Login success/failure
+- Database connection metadata creation
 - Query generation
 - Query selection
-- Validation failure
-- Authorization failure
 - Preview
-- Execution attempt
-- Successful execution
-- Blocked TCL, DCL, and DDL commands
-- Suspicious SQL attempts
+- Execution success
+- Execution blocked
+- Deprecated unsafe route usage
 
-The audit logger does not store passwords, JWT tokens, or credentials intentionally. It also redacts common password, token, secret, API key, and bearer-token patterns before persisting audit text fields.
+Audit text fields are redacted for common password, token, secret, API key, and bearer-token patterns.
 
-## Frontend Security Behavior
+## Remaining Limitations
 
-- Protected sections are disabled before login.
-- JWT tokens are sent in the `Authorization: Bearer <token>` header.
-- `401` responses clear the token and return the user to the login state.
-- `403` responses display the backend authorization message.
-- Displayed backend text is escaped to reduce HTML injection risk.
-- Buttons are hidden or disabled based on backend responses for user experience only.
-- Real authorization is enforced by the backend.
-
-## Known Demo Limitations
-
-- SQLite is used for development, not production deployment.
-- JWTs are stored in `sessionStorage` for the demo frontend.
-- Demo users use simple passwords to make college-project testing easy.
-- Registration is temporarily open for testing; production registration should be admin-only.
-- CORS is permissive for local development and should be restricted for deployment.
-- The default development `SECRET_KEY` must be replaced before deployment.
-
-## Production Hardening Checklist
-
-- Replace demo passwords and rotate seeded credentials.
-- Use a strong random `SECRET_KEY`.
-- Serve the frontend and backend over HTTPS.
-- Restrict CORS origins.
-- Use a production database with migrations.
-- Add rate limiting for login and generation endpoints.
-- Add stronger audit retention and monitoring.
-- Consider secure HTTP-only cookies for token storage.
-- Review row-level security rules before allowing complex joins.
+- JWT is stored in `sessionStorage` for demo simplicity. Production should consider secure, HTTP-only cookies.
+- Public registration is available for demonstration and always creates a standard `USER` account.
+- No rate limiting is implemented yet.
+- No production-grade migration system is included.
+- Complex joins/unions/CTEs are blocked instead of partially supported.
+- PostgreSQL database-per-user depends on provider credential privileges. When unavailable, the secure fallback is schema-per-user.
+- SQLite private file workspaces are reserved for local/offline expansion; the active cloud workflow focuses on Neon PostgreSQL and TiDB Cloud.
+- Demo users use simple passwords and should not be used in production.
