@@ -38,3 +38,33 @@ test("SQL intelligence client refuses to call FastAPI without internal service c
   await expect(client.generate({prompt: "show tables"})).rejects.toThrow("SQL intelligence service is not configured.");
   expect(fetchImpl).not.toHaveBeenCalled();
 });
+
+test("SQL intelligence client retries transient Render-style 502 responses", async () => {
+  const fetchImpl = jest
+    .fn()
+    .mockResolvedValueOnce(response({}, false, 502))
+    .mockResolvedValueOnce(response({allowedTables: []}));
+  const client = new SqlIntelligenceClient({
+    baseUrl: "http://sql-service.test",
+    apiKey: "internal-test-key",
+    fetchImpl,
+    retryDelayMs: 1,
+    sleep: jest.fn().mockResolvedValue(),
+  });
+
+  await expect(client.schema({})).resolves.toEqual({allowedTables: []});
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+});
+
+test("SQL intelligence client does not retry permanent validation errors", async () => {
+  const fetchImpl = jest.fn().mockResolvedValue(response({detail: "Invalid internal API key."}, false, 403));
+  const client = new SqlIntelligenceClient({
+    baseUrl: "http://sql-service.test",
+    apiKey: "wrong-key",
+    fetchImpl,
+    sleep: jest.fn().mockResolvedValue(),
+  });
+
+  await expect(client.schema({})).rejects.toThrow("Invalid internal API key.");
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
